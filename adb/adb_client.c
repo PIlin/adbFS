@@ -216,7 +216,8 @@ int adb_connect(const char *service)
         fprintf(stdout,"* daemon not running. starting it now on port %d *\n",
                 __adb_server_port);
     start_server:
-        if(launch_server(__adb_server_port)) {
+        //if(launch_server(__adb_server_port)) {
+        if (1) {
             fprintf(stderr,"* failed to start daemon *\n");
             return -1;
         } else {
