@@ -180,11 +180,18 @@ static int do_stat(int fd, char const * path, struct stat* st)
         return -1;
     }
 
+    mode_t mode = ltohl(msg.stat.mode);
+    off_t  size = ltohl(msg.stat.size);
+    time_t time = ltohl(msg.stat.time);
+
+    if (!mode && !size && !time)
+        return -1;
+
     if (st)
     {
-        st->st_mode = ltohl(msg.stat.mode);
-        st->st_size = ltohl(msg.stat.size);
-        st->st_mtime = ltohl(msg.stat.time);
+        st->st_mode = mode;
+        st->st_size = size;
+        st->st_mtime = time;
     }
     return 0;
 }

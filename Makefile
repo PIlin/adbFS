@@ -40,7 +40,7 @@ adb.so: $(ADB_OBJS)
 
 all: $(TARGET)
 
-adbfs.o: adbfs.cpp utils.h
+adbfs.o: adbfs.cpp utils.h Makefile
 	$(CXX) -c -o adbfs.o adbfs.cpp $(CXXFLAGS)
 
 $(TARGET): adbfs.o $(ADB_OBJS)
