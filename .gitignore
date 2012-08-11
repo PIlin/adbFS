@@ -1,0 +1,5 @@
+*.o
+*.so
+adbfs
+*.sublime-project
+*.sublime-workspace
