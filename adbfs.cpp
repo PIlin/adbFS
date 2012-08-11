@@ -24,13 +24,13 @@
 
    @code fusermount -u mountpoint @endcode
 
-   as usual for FUSE.  
+   as usual for FUSE.
 
    The above assumes you have a fairly standard Android development
    setup, with adb in the path, busybox available on the Android
    device, etc.  Everything is very lightly tested and a work in
    progress.  Read the source and use with caution.
-   
+
 */
 
 /*
@@ -47,7 +47,7 @@
  *      Redistribution and use in source and binary forms, with or without
  *      modification, are permitted provided that the following conditions are
  *      met:
- *      
+ *
  *      * Redistributions of source code must retain the above copyright
  *        notice, this list of conditions and the following disclaimer.
  *      * Redistributions in binary form must reproduce the above
@@ -57,7 +57,7 @@
  *      * Neither the name of the  nor the names of its
  *        contributors may be used to endorse or promote products derived from
  *        this software without specific prior written permission.
- *      
+ *
  *      THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  *      "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
  *      LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -70,9 +70,11 @@
  *      (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  *      OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
- 
+
 #define FUSE_USE_VERSION 26
 #include "utils.h"
+
+#include "adb_interface.h"
 
 using namespace std;
 
@@ -171,7 +173,7 @@ void adb_shell_escape_command(string& cmd)
 
 /**
    Modify, in place, the given path string by escaping special characters.
-   
+
    @param path the string to modify.
    @see shell_escape_command.
    @todo check/simplify escaping.
@@ -193,7 +195,7 @@ void clearTmpDir(){
 
 /**
    Set a given string to an adb push or pull command with given paths.
-   
+
    @param cmd string to which the adb command is written.
    @param push true for a push command, false for pull.
    @param local_path path on local host for push or pull command.
@@ -201,7 +203,7 @@ void clearTmpDir(){
    @see adb_pull.
    @see adb_push.
  */
-void adb_push_pull_cmd(string& cmd, const bool push, 
+void adb_push_pull_cmd(string& cmd, const bool push,
 		       const string local_path, const string remote_path)
 {
     cmd.assign("adb ");
@@ -248,82 +250,38 @@ queue<string> adb_push(const string local_source,
     return exec_command(cmd);
 }
 
+/////// getattr
+
+
 /**
    adbFS implementation of FUSE interface function fuse_operations.getattr.
    @todo check shell escaping.
  */
 static int adb_getattr(const char *path, struct stat *stbuf)
 {
-    int res = 0;
     memset(stbuf, 0, sizeof(struct stat));
-    queue<string> output;
-    string path_string;
-    path_string.assign(path);
 
-    // TODO caching?
-    if (true || fileData.find(path_string) ==  fileData.end() 
-	|| fileData[path_string].timestamp + 30 > time(NULL)){
-        string command = "stat -t \"";
-        command.append(path_string);
-        command.append("\"");
-        cout << command<<"\n";
-        output = adb_shell(command);
-        fileData[path_string].statOutput = output;
-        fileData[path_string].timestamp = time(NULL);
-    }else{
-        output = fileData[path_string].statOutput;
-        cout << "from cache " << output.front() <<"\n";
-    }
-    vector<string> output_chunk = make_array(output.front());
-    if (output_chunk.size() < 13){
+    if (i_adb_stat(path, stbuf)) {
         return -ENOENT;
     }
-    while (output_chunk.size() > 15){
-        output_chunk.erase( output_chunk.begin());
-    }
-    /*
-       stat -t Explained:
-       file name (%n)
-       total size (%s)
-       number of blocks (%b)
-       raw mode in hex (%f)
-       UID of owner (%u)
-       GID of file (%g)
-       device number in hex (%D)
-       inode number (%i)
-       number of hard links (%h)
-       major devide type in hex (%t)
-       minor device type in hex (%T)
-       last access time as seconds since the Unix Epoch (%X)
-       last modification as seconds since the Unix Epoch (%Y)
-       last change as seconds since the Unix Epoch (%Z)
-       I/O block size (%o)
-       */
-    //stbuf->st_dev = atoi(output_chunk[1].c_str());     /* ID of device containing file */
-    stbuf->st_ino = atoi(output_chunk[7].c_str());     /* inode number */
-    unsigned int raw_mode;
-    xtoi(output_chunk[3].c_str(),&raw_mode);
-    stbuf->st_mode = raw_mode | 0700;    /* protection */
-    stbuf->st_nlink = 1;   /* number of hard links */
-    stbuf->st_uid = atoi(output_chunk[4].c_str());     /* user ID of owner */
-    stbuf->st_gid = atoi(output_chunk[5].c_str());     /* group ID of owner */
 
-    unsigned int device_id;
-    xtoi(output_chunk[6].c_str(),&device_id);
-    stbuf->st_rdev = device_id;    // device ID (if special file)
-
-    stbuf->st_size = atoi(output_chunk[1].c_str());    /* total size, in bytes */
-    stbuf->st_blksize = atoi(output_chunk[14].c_str()); /* blocksize for filesystem I/O */
-    stbuf->st_blocks = atoi(output_chunk[2].c_str());  /* number of blocks allocated */
-    stbuf->st_atime = atol(output_chunk[11].c_str());   /* time of last access */
-    stbuf->st_mtime = atol(output_chunk[12].c_str());   /* time of last modification */
-    stbuf->st_ctime = atol(output_chunk[13].c_str());   /* time of last status change */
-
-    return res;
+    return 0;
 }
 
+/////// readdir
 
-/**
+typedef struct readdir_cb_info {
+    void* buf;
+    fuse_fill_dir_t filler;
+} readdir_cb_info;
+
+static void readdir_cb(char const* name, struct stat const* st, void* cookie)
+{
+    readdir_cb_info* rcbi = (readdir_cb_info*)cookie;
+    rcbi->filler(rcbi->buf, name, st, 0);
+}
+
+/**s
    adbFS implementation of FUSE interface function fuse_operations.readdir.
    @todo check shell escaping.
  */
@@ -332,28 +290,14 @@ static int adb_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 {
     (void) offset;
     (void) fi;
-    string path_string;
-    string local_path_string;
-    path_string.assign(path);
-    local_path_string.assign("/tmp/adbfs/");
-    string_replacer(path_string,"/","-");
-    local_path_string.append(path_string);
-    path_string.assign(path);
 
-    queue<string> output;
-    string command = "ls -1a --color=none \"";
-    command.append(path_string);
-    command.append("\"");
-    output = adb_shell(command);
-    vector<string> output_chunk = make_array(output.front());
-    if (output_chunk.size() >6){
+    readdir_cb_info rcbi = {.buf = buf, .filler = filler };
+
+    int res = i_adb_ls(path, readdir_cb, &rcbi);
+    if (res <= 0)
+    {
         return -ENOENT;
     }
-    while (output.size() > 0){
-        filler(buf, output.front().c_str(), NULL, 0);
-        output.pop();
-    }
-
 
     return 0;
 }
