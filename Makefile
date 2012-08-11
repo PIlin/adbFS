@@ -1,7 +1,7 @@
 all:
 
 
-ADB_CFLAGS=-DADB_HOST=1 -I$(shell pwd) -fPIC $(shell pkg-config zlib --cflags)
+ADB_CFLAGS=-DADB_HOST=1 -I$(shell pwd) -fPIC $(shell pkg-config zlib --cflags) -g
 ADB_LDFLAGS=-lpthread -lrt -fPIC $(shell pkg-config zlib --libs)
 
 ADB_SOURCES :=
