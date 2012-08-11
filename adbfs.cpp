@@ -80,8 +80,6 @@ using namespace std;
 
 void shell_escape_command(string&);
 void adb_shell_escape_command(string&);
-queue<string> adb_push(const string, const string);
-queue<string> adb_pull(const string, const string);
 queue<string> adb_shell(const string);
 queue<string> shell(const string);
 void clearTmpDir();
@@ -193,63 +191,6 @@ void clearTmpDir(){
     mkdir("/tmp/adbfs/",0755);
 }
 
-/**
-   Set a given string to an adb push or pull command with given paths.
-
-   @param cmd string to which the adb command is written.
-   @param push true for a push command, false for pull.
-   @param local_path path on local host for push or pull command.
-   @param remote_path path on remote device for push or pull command.
-   @see adb_pull.
-   @see adb_push.
- */
-void adb_push_pull_cmd(string& cmd, const bool push,
-		       const string local_path, const string remote_path)
-{
-    cmd.assign("adb ");
-    cmd.append((push ? "push '" : "pull '"));
-    cmd.append((push ? local_path : remote_path));
-    cmd.append("' '");
-    cmd.append((push ? remote_path : local_path));
-    cmd.append("'");
-}
-
-/**
-   Copy (using adb pull) a file from the Android device to the local
-   host.
-
-   @param remote_source Android-side file path to copy.
-   @param local_destination local host-side destination path for copy.
-   @return result of the "adb pull ..." executed using exec_command.
-   @see adb_push.
-   @see adb_push_pull_cmd.
-   @todo perhaps avoid or simplify shell-escaping.
-   @bug problems with files with spaces in filenames (adb bug?)
- */
-queue<string> adb_pull(const string remote_source,
-		       const string local_destination)
-{
-    string cmd;
-    adb_push_pull_cmd(cmd, false, local_destination, remote_source);
-    return exec_command(cmd);
-}
-
-/**
-   Copy (using adb push) a file from the local host to the Android
-   device. Very similar to adb_pull.
-
-   @see adb_pull.
-   @see adb_push_pull_cmd.
-   @bug problems with files with spaces in filenames (adb bug?)
- */
-queue<string> adb_push(const string local_source,
-		       const string remote_destination)
-{
-    string cmd;
-    adb_push_pull_cmd(cmd, true, local_source, remote_destination);
-    return exec_command(cmd);
-}
-
 /////// getattr
 
 
@@ -303,6 +244,8 @@ static int adb_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 }
 
 
+/////// open
+
 static int adb_open(const char *path, struct fuse_file_info *fi)
 {
     string path_string;
@@ -313,25 +256,23 @@ static int adb_open(const char *path, struct fuse_file_info *fi)
     local_path_string.append(path_string);
     path_string.assign(path);
     cout << "-- " << path_string << " " << local_path_string << "\n";
-    if (!fileTruncated[path_string]){
-        queue<string> output;
-        string command = "stat -t \"";
-        command.append(path_string);
-        command.append("\"");
-        cout << command<<"\n";
-        output = adb_shell(command);
-        vector<string> output_chunk = make_array(output.front());
-        if (output_chunk.size() < 13){
+
+    if (!fileTruncated[path_string]) {
+
+        if (i_adb_stat(path, NULL)) {
             return -ENOENT;
         }
-	path_string.assign(path);
-	local_path_string.assign("/tmp/adbfs/");
-	string_replacer(path_string,"/","-");
-	local_path_string.append(path_string);
-	shell_escape_path(local_path_string);
-	path_string.assign(path);
-        adb_pull(path_string,local_path_string);
-    }else{
+
+        path_string.assign(path);
+        local_path_string.assign("/tmp/adbfs/");
+        string_replacer(path_string,"/","-");
+        local_path_string.append(path_string);
+        shell_escape_path(local_path_string);
+        path_string.assign(path);
+
+        i_adb_pull(path_string.c_str(), local_path_string.c_str());
+    }
+    else {
         fileTruncated[path_string] = false;
     }
 
@@ -369,9 +310,10 @@ static int adb_write(const char *path, const char *buf, size_t size, off_t offse
     filePendingWrite[fd] = true;
 
     int res = pwrite(fd, buf, size, offset);
-    //close(fd);
-    //adb_push(local_path_string,path_string);
-    //adb_shell("sync");
+    close(fd);
+
+    i_adb_push(local_path_string.c_str(), path_string.c_str());
+    adb_shell("sync");
     if (res == -1)
         res = -errno;
     return res;
@@ -391,7 +333,7 @@ static int adb_flush(const char *path, struct fuse_file_info *fi) {
     cout << "flag is: "<< flags <<"\n";
     if (filePendingWrite[fd]) {
         filePendingWrite[fd] = false;
-        adb_push(local_path_string,path_string);
+        i_adb_push(local_path_string.c_str(), path_string.c_str());
         adb_shell("sync");
     }
     return 0;
@@ -446,8 +388,9 @@ static int adb_truncate(const char *path, off_t size) {
     cout << command<<"\n";
     output = adb_shell(command);
     vector<string> output_chunk = make_array(output.front());
-    if (output_chunk.size() < 13){
-        adb_pull(path_string,local_path_string);
+
+    if (i_adb_stat(path, NULL)) {
+        i_adb_pull(path_string.c_str(), local_path_string.c_str());
     }
 
     fileTruncated[path_string] = true;
@@ -468,7 +411,7 @@ static int adb_mknod(const char *path, mode_t mode, dev_t rdev) {
 
     cout << "mknod for " << local_path_string << "\n";
     mknod(local_path_string.c_str(),mode, rdev);
-    adb_push(local_path_string,path_string);
+    i_adb_push(local_path_string.c_str(), path_string.c_str());
     adb_shell("sync");
 
     fileData[path_string].timestamp = fileData[path_string].timestamp + 50;

@@ -19,10 +19,24 @@ int i_adb_ls(char const * path, i_adb_ls_cb cb_func, void* cookie);
 
 
 /**
+ * @param st pointer to struct stat or NULL
  * @retval -1 error
  * @retval 0 ok
  */
 int i_adb_stat(char const * path, struct stat* st);
+
+
+/**
+ * @retval 0 ok
+ * @retval !0 error
+ */
+int i_adb_pull(char const* rpath, char const* lpath);
+
+/**
+ * @retval 0 ok
+ * @retval !0 error
+ */
+int i_adb_push(char const* lpath, char const* rpath);
 
 #ifdef __cplusplus
 } // extern "C"

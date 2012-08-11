@@ -157,7 +157,7 @@ int i_adb_ls(char const * path, i_adb_ls_cb cb_func, void* cookie)
 
 // ls
 
-static do_stat(int fd, char const * path, struct stat* st)
+static int do_stat(int fd, char const * path, struct stat* st)
 {
     TRACE();
 
@@ -180,9 +180,12 @@ static do_stat(int fd, char const * path, struct stat* st)
         return -1;
     }
 
-    st->st_mode = ltohl(msg.stat.mode);
-    st->st_size = ltohl(msg.stat.size);
-    st->st_mtime = ltohl(msg.stat.time);
+    if (st)
+    {
+        st->st_mode = ltohl(msg.stat.mode);
+        st->st_size = ltohl(msg.stat.size);
+        st->st_mtime = ltohl(msg.stat.time);
+    }
     return 0;
 }
 
@@ -190,12 +193,6 @@ int i_adb_stat(char const * path, struct stat* st)
 {
     TRACE();
     DL("path = %s\n", path);
-
-    assert(st);
-    if (!st) {
-        fprintf(stderr,"st is NULL");
-        return -1;
-    }
 
     int fd = adb_connect("sync:");
     if(fd < 0) {
@@ -209,4 +206,20 @@ int i_adb_stat(char const * path, struct stat* st)
         sync_quit(fd);
         return 0;
     }
+}
+
+// pull
+
+int i_adb_pull(char const* rpath, char const* lpath)
+{
+    TRACE();
+    return do_sync_pull(rpath, lpath);
+}
+
+// push
+
+int i_adb_push(char const* lpath, char const* rpath)
+{
+    TRACE();
+    return do_sync_push(lpath, rpath, 0);
 }
